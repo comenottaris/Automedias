@@ -8,7 +8,7 @@ export async function handler(event, context) {
 
   try {
     await client.connect();
-    const res = await client.query("SELECT * FROM sites ORDER BY title ASC;");
+    const res = await client.query("SELECT * FROM automedias ORDER BY title ASC;");
     await client.end();
 
     return {
