@@ -9,7 +9,7 @@ const { Client } = require("pg");
  */
 const PG_CONNECTION = process.env.PG_CONNECTION || "postgresql://neondb_owner:npg_4XfqJQhV3bpe@ep-dark-forest-abvkn94d-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require";
 const TABLE_SCHEMA = process.env.TABLE_SCHEMA || "public";
-const TABLE_NAME = process.env.TABLE_NAME || "automedias"; // ex: Automedias
+const TABLE_NAME = process.env.TABLE_NAME || "Automedias"; // ex: Automedias
 
 // limit pour GET
 const GET_LIMIT = 100;
