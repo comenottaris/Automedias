@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Atlas des Automédias — Obsidian Dark</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="site-header">
+  <div class="header-inner">
+    <h1>Atlas des Automédias</h1>
+    <p class="subtitle">Carte et index des collectifs, automédias et archives — filtrable et consultable.</p>
+
+    <div class="controls">
+      <div class="filters">
+        <select id="filter-type" aria-label="Filtrer par type">
+          <option value="">Tous types</option>
+        </select>
+
+        <select id="filter-country" aria-label="Filtrer par pays">
+          <option value="">Tous pays</option>
+        </select>
+
+        <input id="search" type="search" placeholder="Rechercher nom, plateforme, pays..." aria-label="Recherche">
+      </div>
+      <div class="notes">Données servies par <code>/.netlify/functions/get_sites</code> (fallback local : <code>db.json</code>).</div>
+    </div>
+  </div>
+</header>
+
+<main id="cards-container" class="cards-grid" aria-live="polite">
+  <!-- cartes injectées par script.js -->
+</main>
+
+<!-- Modal (centré) -->
+<div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal-content" role="document">
+    <button class="close" aria-label="Fermer la fenêtre">&times;</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="script.js" defer></script>
+</body>
+</html>

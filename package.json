@@ -1,0 +1,8 @@
+{
+  "name": "automedias-site",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.10.0"
+  }
+}
