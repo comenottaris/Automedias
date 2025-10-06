@@ -1,6 +1,10 @@
 // script.js — front fetch from Netlify function, fallback to db.json
-const API_ENDPOINT = "/.netlify/functions/get_sites";
-const FALLBACK_JSON = "db.json"; // dev fallback
+// Essaie plusieurs endpoints (fetch_sites puis get_sites) puis fallback local.
+const API_ENDPOINTS = [
+  "/.netlify/functions/fetch_sites",
+  "/.netlify/functions/get_sites"
+];
+const FALLBACK_JSON = "db.json"; // dev fallback/local fallback
 
 let dbData = [];
 
@@ -12,30 +16,69 @@ const closeBtn = document.querySelector(".close");
 const selectType = document.getElementById("filter-type");
 const selectCountry = document.getElementById("filter-country");
 const searchInput = document.getElementById("search");
+const statusEl = document.getElementById("data-status");
+const refreshBtn = document.getElementById("refresh-btn");
 
-// Load data: try API first, else fallback to local file
+// Load data: try endpoints in order, else fallback to local file
 async function loadData() {
-  try {
-    const resp = await fetch(API_ENDPOINT, {cache: "no-store"});
-    if (!resp.ok) throw new Error("API fetch failed: " + resp.status);
-    const json = await resp.json();
-    console.log("Loaded from API:", json.length, "records");
-    dbData = normalizeArray(json);
-  } catch (err) {
-    console.warn("API fetch failed, falling back to local", err);
+  setStatus("Chargement…", "loading");
+  showLoading();
+
+  let loaded = false;
+  let lastError = null;
+
+  for (const endpoint of API_ENDPOINTS) {
     try {
-      const resp2 = await fetch(FALLBACK_JSON);
+      const resp = await fetch(endpoint, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${endpoint}`);
+      const json = await resp.json();
+      dbData = normalizeArray(json);
+      setStatus("Live (Neon) via " + endpoint, "live");
+      loaded = true;
+      break;
+    } catch (err) {
+      // try next endpoint
+      console.warn("endpoint failed:", endpoint, err);
+      lastError = err;
+    }
+  }
+
+  if (!loaded) {
+    // fallback local
+    try {
+      const resp2 = await fetch(FALLBACK_JSON, { cache: "no-store" });
+      if (!resp2.ok) throw new Error("Local fallback not found: " + resp2.status);
       const json2 = await resp2.json();
       dbData = normalizeArray(json2);
-      console.log("Loaded from local db.json:", dbData.length, "records");
+      setStatus("Fallback : db.json (local)", "fallback");
+      loaded = true;
     } catch (e2) {
       console.error("Fallback load failed:", e2);
-      dbData = [];
+      lastError = e2;
     }
+  }
+
+  if (!loaded) {
+    setStatus("Erreur chargement (voir console)", "error");
+    container.innerHTML = `<div style="color:var(--muted);padding:20px">Impossible de charger les données. Vérifiez la console.</div>`;
+    return;
   }
 
   populateFilters();
   applyFilters(); // initial render
+}
+
+// UI helpers
+function setStatus(text, type) {
+  if (!statusEl) return;
+  statusEl.textContent = `Statut : ${text}`;
+  // apply light class styling if needed
+  statusEl.dataset.status = type || "";
+}
+
+function showLoading() {
+  if (!container) return;
+  container.innerHTML = `<div style="color:var(--muted);padding:18px">Chargement des données…</div>`;
 }
 
 // Normalize entries to expected shape (defensive)
@@ -71,6 +114,8 @@ function parsePossiblyStringified(value) {
       const parsed = JSON.parse(value);
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch {
+      // maybe it's a comma-separated string
+      if (value.includes(",")) return value.split(",").map(s => s.trim()).filter(Boolean);
       return [value];
     }
   }
@@ -118,7 +163,8 @@ function displayCards(items) {
         a.className = "social-link";
         a.href = url || "#";
         a.textContent = name || url || "link";
-        if (url) a.target = "_blank";
+        if (url) a.target = "_blank" ;
+        a.rel = "noopener noreferrer";
         // stopPropagation so clicking link doesn't open modal
         a.addEventListener("click", (ev) => ev.stopPropagation());
         socialLinksDiv.appendChild(a);
@@ -168,10 +214,10 @@ function openModal(item) {
   let socialHTML = "";
   if (Array.isArray(item.platforms) && item.platforms.length) {
     const links = item.platforms.map(p => {
-      if (typeof p === "string") return `<a href="${escapeHtml(p)}" target="_blank">${escapeHtml(p)}</a>`;
+      if (typeof p === "string") return `<a href="${escapeHtml(p)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p)}</a>`;
       const name = escapeHtml(p.name || p.platform || p.title || "");
       const url = escapeHtml(p.url || p.link || "");
-      return url ? `<a href="${url}" target="_blank">${name || url}</a>` : `${name}`;
+      return url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${name || url}</a>` : `${name}`;
     }).join(" · ");
     socialHTML = `<p><strong>Réseaux :</strong> ${links}</p>`;
   }
@@ -182,7 +228,7 @@ function openModal(item) {
   modalBody.innerHTML = `
     <div class="modal-body">
       <h2>${escapeHtml(item.title || item.url)}</h2>
-      <p><strong>URL :</strong> <a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.url)}</a></p>
+      <p><strong>URL :</strong> <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.url)}</a></p>
       <p><strong>Type :</strong> ${escapeHtml(item.type || "—")}</p>
       <p><strong>Pays :</strong> ${escapeHtml(item.country || "—")}</p>
       <p><strong>Langue :</strong> ${escapeHtml(item.language || "—")}</p>
@@ -269,6 +315,7 @@ function escapeHtml(s){
 selectType.addEventListener("change", applyFilters);
 selectCountry.addEventListener("change", applyFilters);
 searchInput.addEventListener("input", applyFilters);
+refreshBtn.addEventListener("click", () => { loadData(); });
 
 // start
 document.addEventListener("DOMContentLoaded", loadData);
