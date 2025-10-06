@@ -2,18 +2,46 @@
 const { Client } = require("pg");
 
 /**
- * CONFIG - connection string hardcoded (change if needed)
- * Warning: hardcoding secrets in repo is unsafe for production.
+ * CONFIG
+ * - Vous pouvez remplacer PG_CONNECTION directement ici, ou définir process.env.PG_CONNECTION.
+ * - TABLE_SCHEMA (default: public)
+ * - TABLE_NAME (default: sites) -> mettez "Automedias" si votre table s'appelle Automedias (sans quotes)
  */
-const PG_CONNECTION = "postgresql://neondb_owner:npg_4XfqJQhV3bpe@ep-dark-forest-abvkn94d-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require";
+const PG_CONNECTION = process.env.PG_CONNECTION || "postgresql://neondb_owner:npg_4XfqJQhV3bpe@ep-dark-forest-abvkn94d-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require";
+const TABLE_SCHEMA = process.env.TABLE_SCHEMA || "automedias";
+const TABLE_NAME = process.env.TABLE_NAME || "automedias"; // ex: Automedias
 
-/**
- * Ensure table + unique constraint exist.
- */
-async function ensureTable(client) {
-  // create table if missing
+// limit pour GET
+const GET_LIMIT = 100;
+
+// helper pour quotifier identifiants SQL proprement
+function quoteIdent(name) {
+  return '"' + String(name).replace(/"/g, '""') + '"';
+}
+
+// construit qualified identifier: "schema"."table"
+function qualifiedTable(schema, table) {
+  return `${quoteIdent(schema)}.${quoteIdent(table)}`;
+}
+
+/** Vérifie si la table existe dans information_schema */
+async function tableExists(client, schema, table) {
+  const q = `
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = $1 AND table_name = $2
+    LIMIT 1
+  `;
+  const r = await client.query(q, [schema, table]);
+  return r.rowCount > 0;
+}
+
+/** Crée la table si absente (schéma attendu) */
+async function createTableIfMissing(client, schema, table) {
+  const exists = await tableExists(client, schema, table);
+  if (exists) return false;
+  const qt = qualifiedTable(schema, table);
   await client.query(`
-    CREATE TABLE IF NOT EXISTS public.sites (
+    CREATE TABLE ${qt} (
       id SERIAL PRIMARY KEY,
       url TEXT NOT NULL,
       title TEXT,
@@ -29,47 +57,52 @@ async function ensureTable(client) {
       notes TEXT
     );
   `);
+  return true;
+}
 
-  // create unique constraint on url if not exists
+/** Crée contrainte unique url si elle n'existe pas */
+async function ensureUniqueUrlConstraint(client, schema, table) {
+  // constraint name deterministic
+  const constraintName = `${table}_url_unique`;
+  const q = `
+    SELECT 1
+    FROM information_schema.table_constraints
+    WHERE table_schema = $1 AND table_name = $2 AND constraint_name = $3
+    LIMIT 1
+  `;
+  const r = await client.query(q, [schema, table, constraintName]);
+  if (r.rowCount > 0) return false;
+
+  // créer la contrainte dans un block pour ignorer duplicate_object race
+  const qt = qualifiedTable(schema, table);
   await client.query(`
     DO $$
     BEGIN
       IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint c
-        JOIN pg_class t ON c.conrelid = t.oid
-        WHERE c.contype = 'u' AND t.relname = 'sites' AND array_to_string(c.conkey,',') LIKE '%'
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = ${client.escapeLiteral(schema)} AND table_name = ${client.escapeLiteral(table)} AND constraint_name = ${client.escapeLiteral(constraintName)}
       ) THEN
-        -- check whether a constraint named sites_url_unique already exists
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints
-          WHERE table_name='sites' AND constraint_name='sites_url_unique'
-        ) THEN
-          BEGIN
-            ALTER TABLE public.sites ADD CONSTRAINT sites_url_unique UNIQUE (url);
-          EXCEPTION WHEN duplicate_object THEN
-            -- ignore if someone else created simultaneously
-          END;
-        END IF;
+        BEGIN
+          ALTER TABLE ${qt} ADD CONSTRAINT ${quoteIdent(constraintName)} UNIQUE (url);
+        EXCEPTION WHEN duplicate_object THEN
+          -- ignore race condition
+        END;
       END IF;
     END$$;
   `);
+  return true;
 }
 
-/**
- * Upsert a single item. Returns { inserted: boolean, url }
- * Uses a WITH ... RETURNING (xmax = 0) trick to detect insertion.
- */
-async function upsertOne(client, item) {
+/** Upsert item into chosen table */
+async function upsertOne(client, schema, table, item) {
+  const qt = qualifiedTable(schema, table);
   const q = `
     WITH upsert AS (
-      INSERT INTO public.sites (
+      INSERT INTO ${qt} (
         url, title, type, language, country,
         platforms, data_formats, emails,
         html_path, md_path, wayback_status, notes
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
-      )
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       ON CONFLICT (url) DO UPDATE
         SET title = EXCLUDED.title,
             type = EXCLUDED.type,
@@ -103,72 +136,65 @@ async function upsertOne(client, item) {
   ];
 
   const res = await client.query(q, params);
-  // if INSERT/UPDATE returns a row, res.rows[0].inserted is boolean (true => inserted)
   if (res && res.rows && res.rows[0]) {
     return { url: item.url || null, inserted: !!res.rows[0].inserted };
-  } else {
-    // fallback - consider updated
-    return { url: item.url || null, inserted: false };
   }
+  return { url: item.url || null, inserted: false };
 }
 
-exports.handler = async function (event, context) {
+/** Handler */
+exports.handler = async function (event) {
   const method = (event.httpMethod || "GET").toUpperCase();
 
   const client = new Client({ connectionString: PG_CONNECTION, ssl: { rejectUnauthorized: false } });
 
   try {
     await client.connect();
-    console.log("Connected to Neon/Postgres");
+    console.log("DB INFO: connected to", PG_CONNECTION);
 
-    // Ensure table + unique constraint are present
-    await ensureTable(client);
+    // s'assurer que la table existe et qu'elle a la contrainte UNIQUE(url)
+    const created = await createTableIfMissing(client, TABLE_SCHEMA, TABLE_NAME);
+    if (created) console.log(`Table ${TABLE_SCHEMA}.${TABLE_NAME} created (was missing).`);
+    const addedConstraint = await ensureUniqueUrlConstraint(client, TABLE_SCHEMA, TABLE_NAME);
+    if (addedConstraint) console.log(`Unique constraint on url added to ${TABLE_SCHEMA}.${TABLE_NAME}`);
+
+    const qualified = qualifiedTable(TABLE_SCHEMA, TABLE_NAME);
 
     if (method === "GET") {
-      // Return all rows (limit to prevent huge payloads)
-      const res = await client.query("SELECT * FROM public.sites ORDER BY id ASC LIMIT 5000;");
+      const limit = GET_LIMIT;
+      const q = `SELECT * FROM ${qualified} ORDER BY id ASC LIMIT $1;`;
+      const resp = await client.query(q, [limit]);
       return {
         statusCode: 200,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(res.rows)
+        body: JSON.stringify(resp.rows)
       };
     }
 
     if (method === "POST") {
-      // Expect JSON body: either an object or an array of objects
+      // upsert array or single object
       let payload;
       try {
         payload = event.body ? JSON.parse(event.body) : null;
       } catch (e) {
-        return { statusCode: 400, body: JSON.stringify({ error: "invalid json body" }) };
+        return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON body" }) };
       }
 
-      let items = [];
-      if (!payload) {
-        return { statusCode: 400, body: JSON.stringify({ error: "empty body" }) };
-      } else if (Array.isArray(payload)) {
-        items = payload;
-      } else if (typeof payload === "object") {
-        items = [payload];
-      } else {
-        return { statusCode: 400, body: JSON.stringify({ error: "expect object or array" }) };
-      }
+      if (!payload) return { statusCode: 400, body: JSON.stringify({ error: "Empty body" }) };
 
+      const items = Array.isArray(payload) ? payload : [payload];
       const results = [];
-      let inserted = 0;
-      let updated = 0;
+      let inserted = 0, updated = 0;
 
       for (const it of items) {
-        // Basic validation: need url
         if (!it.url) {
           results.push({ url: null, error: "missing url" });
           continue;
         }
         try {
-          const r = await upsertOne(client, it);
+          const r = await upsertOne(client, TABLE_SCHEMA, TABLE_NAME, it);
           results.push(r);
-          if (r.inserted) inserted++;
-          else updated++;
+          if (r.inserted) inserted++; else updated++;
         } catch (err) {
           console.error("Upsert error for", it.url, err.message);
           results.push({ url: it.url, error: err.message });
@@ -182,15 +208,11 @@ exports.handler = async function (event, context) {
       };
     }
 
-    // Method not allowed
     return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+
   } catch (err) {
-    console.error("get_sites error:", err);
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: err.message })
-    };
+    console.error("Function error:", err);
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   } finally {
     try { await client.end(); } catch (e) {}
   }
