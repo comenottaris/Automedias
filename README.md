@@ -1,7 +1,7 @@
-# Atlas des Automédias — README
+# Automédiathèque — README
 
 **But du projet**  
-Atlas web et base de données centralisée des collectifs / automédias (petites luttes, collectifs locaux, automédias). Interface filtrable et consultable, donnée source stockée dans **Neon (Postgres)** et servie via **Netlify Functions**.
+Base de données centralisée des collectifs / automédias (petites luttes, collectifs locaux, automédias). Interface filtrable et consultable, donnée source stockée dans **Neon (Postgres)** et servie via **Netlify Functions**.
 
 ---
 
