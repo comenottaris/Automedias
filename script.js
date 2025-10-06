@@ -1,7 +1,6 @@
 // script.js — front fetch from Netlify function, fallback to db.json
 // Essaie plusieurs endpoints (fetch_sites puis get_sites) puis fallback local.
 const API_ENDPOINTS = [
-  "/.netlify/functions/fetch_sites",
   "/.netlify/functions/get_sites"
 ];
 const FALLBACK_JSON = "db.json"; // dev fallback/local fallback
@@ -319,3 +318,4 @@ refreshBtn.addEventListener("click", () => { loadData(); });
 
 // start
 document.addEventListener("DOMContentLoaded", loadData);
+
