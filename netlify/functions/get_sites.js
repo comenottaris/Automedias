@@ -8,7 +8,7 @@ const { Client } = require("pg");
  * - TABLE_NAME (default: sites) -> mettez "Automedias" si votre table s'appelle Automedias (sans quotes)
  */
 const PG_CONNECTION = process.env.PG_CONNECTION || "postgresql://neondb_owner:npg_4XfqJQhV3bpe@ep-dark-forest-abvkn94d-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require";
-const TABLE_SCHEMA = process.env.TABLE_SCHEMA || "automedias";
+const TABLE_SCHEMA = process.env.TABLE_SCHEMA || "public";
 const TABLE_NAME = process.env.TABLE_NAME || "automedias"; // ex: Automedias
 
 // limit pour GET
